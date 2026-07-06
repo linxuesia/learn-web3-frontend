@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Lesson 01 · 第一支能跑的 DApp：连钱包 + 读余额</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+<main>
+
+<h1>Lesson 01 · 第一支能跑的 DApp</h1>
+<p class="subtitle">连接钱包 + 读地址 + 读原生代币余额 · 目标 25 分钟内跑通</p>
+
+<div class="callout">
+<strong>为什么先学这个？</strong> 一个月要出能演示的 DApp，最贵的第一步是 <em>你手上真的有一个跑得起来的项目骨架</em>。所有后续（发交易、调合约、读事件）都长在这个骨架上。别在这节纠结原理，先让它跑。
+</div>
+
+<h2>1. 前置准备（一次性，5 分钟）</h2>
+
+<ul class="checklist">
+<li>已装 Node 20+（<code>node -v</code> 看一下）。</li>
+<li>Chrome/Brave/Arc 已装 <a href="https://metamask.io/download/">MetaMask</a>。</li>
+<li>MetaMask 里切到 <strong>Sepolia</strong> 测试网（Settings → Advanced → 打开 <em>Show test networks</em>）。</li>
+<li>拿点 Sepolia 测试币：<a href="https://cloud.google.com/application/web3/faucet/ethereum/sepolia">Google Cloud Faucet</a> 或 <a href="https://sepolia-faucet.pk910.de/">PoW Faucet</a>。0.05 ETH 够用一个月。</li>
+</ul>
+
+<h2>2. 起一个空的 Vite + React + TS 项目（3 分钟）</h2>
+
+<pre><code>cd ~/sia
+npm create vite@latest web3-hello -- --template react-ts
+cd web3-hello
+npm i wagmi viem @tanstack/react-query
+npm run dev
+</code></pre>
+
+<p>浏览器打开 <code>http://localhost:5173</code>，看到 Vite 默认页 = OK。</p>
+
+<h2>3. 配置 wagmi（5 分钟）</h2>
+
+<p>建 <code>src/wagmi.ts</code>：</p>
+
+<pre><code>import { http, createConfig } from 'wagmi'
+import { sepolia } from 'wagmi/chains'
+import { injected } from 'wagmi/connectors'
+
+export const config = createConfig({
+  chains: [sepolia],
+  connectors: [injected()],
+  transports: {
+    [sepolia.id]: http(),
+  },
+})
+</code></pre>
+
+<p>改 <code>src/main.tsx</code>，把 App 包在 wagmi + react-query 的 Provider 里：</p>
+
+<pre><code>import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { WagmiProvider } from 'wagmi'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { config } from './wagmi'
+import App from './App'
+import './index.css'
+
+const queryClient = new QueryClient()
+
+createRoot(document.getElementById('root')!).render(
+  &lt;StrictMode&gt;
+    &lt;WagmiProvider config={config}&gt;
+      &lt;QueryClientProvider client={queryClient}&gt;
+        &lt;App /&gt;
+      &lt;/QueryClientProvider&gt;
+    &lt;/WagmiProvider&gt;
+  &lt;/StrictMode&gt;,
+)
+</code></pre>
+
+<h2>4. 写「连钱包 + 读余额」的 UI（8 分钟）</h2>
+
+<p>把 <code>src/App.tsx</code> 换成：</p>
+
+<pre><code>import {
+  useAccount, useConnect, useDisconnect, useBalance, useChainId,
+} from 'wagmi'
+import { formatEther } from 'viem'
+
+export default function App() {
+  const { address, isConnected } = useAccount()
+  const chainId = useChainId()
+  const { connectors, connect, status, error } = useConnect()
+  const { disconnect } = useDisconnect()
+  const { data: balance } = useBalance({ address })
+
+  return (
+    &lt;main style={{ maxWidth: 640, margin: '3rem auto', fontFamily: 'system-ui' }}&gt;
+      &lt;h1&gt;Hello Web3&lt;/h1&gt;
+
+      {!isConnected ? (
+        &lt;div&gt;
+          {connectors.map((c) =&gt; (
+            &lt;button key={c.uid} onClick={() =&gt; connect({ connector: c })}&gt;
+              连接 {c.name}
+            &lt;/button&gt;
+          ))}
+          {status === 'pending' &amp;&amp; &lt;p&gt;连接中…&lt;/p&gt;}
+          {error &amp;&amp; &lt;p style={{ color: 'crimson' }}&gt;{error.message}&lt;/p&gt;}
+        &lt;/div&gt;
+      ) : (
+        &lt;div&gt;
+          &lt;p&gt;地址：&lt;code&gt;{address}&lt;/code&gt;&lt;/p&gt;
+          &lt;p&gt;当前链 ID：{chainId}&lt;/p&gt;
+          &lt;p&gt;
+            余额：
+            {balance
+              ? \`\${formatEther(balance.value)} \${balance.symbol}\`
+              : '读取中…'}
+          &lt;/p&gt;
+          &lt;button onClick={() =&gt; disconnect()}&gt;断开&lt;/button&gt;
+        &lt;/div&gt;
+      )}
+    &lt;/main&gt;
+  )
+}
+</code></pre>
+
+<h2>5. 验证你的 win（2 分钟）</h2>
+
+<ul class="checklist">
+<li>点「连接 Injected / MetaMask」→ MetaMask 弹窗 → 授权。</li>
+<li>页面上应出现你的地址、Chain ID = <code>11155111</code>（Sepolia）、Sepolia ETH 余额。</li>
+<li>断开后按钮变回「连接」。</li>
+</ul>
+
+<p>如果这几步都成立，恭喜——你已经跑通了 web3 前端的最短闭环：<em>钱包 → 前端 → 链 → 数据 → UI</em>。所有后续内容都是在这条链路上加东西。</p>
+
+<h2>6. 20% 的原理，够撑面试第一层</h2>
+
+<ul>
+<li><strong>钱包为什么能被网页读到？</strong> 因为浏览器钱包会往页面注入一个符合 <a href="https://eips.ethereum.org/EIPS/eip-1193">EIP-1193</a> 的 provider（早期是 <code>window.ethereum</code>，现代是 <a href="https://eips.ethereum.org/EIPS/eip-6963">EIP-6963</a> 多钱包发现）。<code>wagmi</code> 的 <code>injected()</code> 就是在这层之上做的封装。</li>
+<li><strong>viem vs ethers vs wagmi？</strong> viem 是底层 EVM 客户端；wagmi 是它的 React hooks 封装；ethers 是老前辈，很多老项目还在用，但新项目 2024 起主流是 wagmi + viem。</li>
+<li><strong>为什么要 react-query？</strong> wagmi 的 hooks 底层用 react-query 做缓存和 refetch，链上数据本质是"网络请求"，缓存/失效逻辑复用 react-query 是最省心的方案。</li>
+</ul>
+
+<h2>推荐今天读的一份「主源」</h2>
+
+<blockquote>
+<a href="https://wagmi.sh/react/getting-started">wagmi · Getting Started</a>
+—— 别读第三方博客，先啃 20 分钟官方 Getting Started。你今天写的每一行代码都能在这里找到出处。
+</blockquote>
+
+<h2>下节预告（Lesson 02）</h2>
+
+<p>在这个骨架上加：<strong>切链（Sepolia ↔ Base Sepolia）、发一笔真正的转账交易、读 tx 状态直到确认</strong>。到 Lesson 02 结束，你就跑完了"读+写"两条主线。</p>
+
+<h2>问 sia 一个问题</h2>
+
+<p>课后不用马上答，做完题材再告诉我：</p>
+
+<blockquote>
+你的 <code>useBalance</code> 拿到的数字，是从 <em>MetaMask</em> 读的，还是从 <em>Sepolia 节点</em> 读的？为什么？
+</blockquote>
+
+<div class="callout">
+<strong>卡住就问我。</strong> 你的教师是我（大侠 🛡️）。任何一步跑不通、报错、看不懂——直接把命令、报错、期望值告诉我，我陪你定位。不要憋。
+</div>
+
+<div class="footer">
+Lesson 01 · Web3 前端 · <a href="../MISSION.md">Mission</a> · <a href="../RESOURCES.md">Resources</a>
+</div>
+
+</main>
+</body>
+</html>
