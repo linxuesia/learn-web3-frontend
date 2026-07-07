@@ -149,6 +149,35 @@ blockquote {
   color: var(--muted);
 }
 
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.94em;
+}
+
+table th, table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
+}
+
+table th {
+  font-weight: 600;
+  color: var(--accent);
+  border-bottom: 2px solid var(--rule);
+}
+
+table tr:hover td {
+  background: var(--code-bg);
+}
+
+table code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.95em;
+}
+
 @media print {
   :root { --bg: white; --ink: black; --muted: #333; --code-bg: #f4f4f4; }
   main { max-width: none; margin: 0; padding: 0 1cm; }

@@ -25,6 +25,69 @@
 <li>拿点 Sepolia 测试币：<a href="https://cloud.google.com/application/web3/faucet/ethereum/sepolia">Google Cloud Faucet</a> 或 <a href="https://sepolia-faucet.pk910.de/">PoW Faucet</a>。0.05 ETH 够用一个月。</li>
 </ul>
 
+<h2>1.5 如何确认当前连的是哪个网络？（必备小技能）</h2>
+
+<p>MetaMask 有时候点了切换网络 UI 没刷新，容易让人误判。这一段以后会反复用——<strong>永远不要靠 UI 感觉判断当前在哪个网上</strong>，用下面这几种方式一秒验证。</p>
+
+<h3>方法 A：看 MetaMask 里的三处标识（最快）</h3>
+
+<ul>
+<li><strong>顶部网络下拉按钮</strong>：会写着 <code>Sepolia</code> / <code>Ethereum Mainnet</code> 等。</li>
+<li><strong>余额那行的代币符号</strong>：主网显示 <code>ETH</code>，Sepolia 显示 <code>SepoliaETH</code>，Base Sepolia 显示 <code>ETH</code>（但网络名不同）。<em>这行比顶部按钮更不容易骗人。</em></li>
+<li><strong>底部胶囊按钮</strong>：同样写着当前网络名。</li>
+</ul>
+
+<h3>方法 B：Console 一行代码验（最硬核，面试也可能问）</h3>
+
+<p>打开任意<strong>正常网页</strong>（比如 <a href="https://sepolia.etherscan.io">sepolia.etherscan.io</a> 或 <a href="https://ethereum.org">ethereum.org</a>——不能是 <code>chrome://</code> 开头的内部页，MetaMask 不往那些页面注入），F12 → Console → 粘：</p>
+
+<pre><code>await window.ethereum.request({ method: 'eth_chainId' })
+</code></pre>
+
+<p>拿到十六进制的 chainId 后，对照下面这张表。或者一次查全套：</p>
+
+<pre><code>const chainId = await window.ethereum.request({ method: 'eth_chainId' })
+const accounts = await window.ethereum.request({ method: 'eth_accounts' })
+console.log({ chainId, chainIdDec: parseInt(chainId, 16), accounts })
+</code></pre>
+
+<div class="callout">
+<strong>坑点：</strong>如果报 <code>Cannot read properties of undefined (reading 'request')</code>，说明这个页面没被注入 <code>window.ethereum</code>——不是钱包坏了，是<em>你在错的页面按 F12 了</em>（新标签页、<code>chrome://extensions</code>、<code>about:blank</code> 都不会被注入）。换个普通网站再试。
+</div>
+
+<h3>方法 C：chainlist.org 直连测试</h3>
+
+<p>打开 <a href="https://chainlist.org/?testnets=true">chainlist.org</a>（勾上 Testnets）→ 点 "Connect Wallet"，它直接把当前网络亮出来，还能一键给 MetaMask 加新链。</p>
+
+<h3>常用 Chain ID 速查表</h3>
+
+<table class="chain-table">
+<thead>
+<tr><th>网络</th><th>chainId (hex)</th><th>chainId (dec)</th><th>类型</th></tr>
+</thead>
+<tbody>
+<tr><td>Ethereum Mainnet</td><td><code>0x1</code></td><td><code>1</code></td><td>主网 💰</td></tr>
+<tr><td><strong>Sepolia</strong>（我们主用）</td><td><code>0xaa36a7</code></td><td><code>11155111</code></td><td>以太坊测试网</td></tr>
+<tr><td>Base Sepolia</td><td><code>0x14a34</code></td><td><code>84532</code></td><td>L2 测试网</td></tr>
+<tr><td>Base Mainnet</td><td><code>0x2105</code></td><td><code>8453</code></td><td>L2 主网 💰</td></tr>
+<tr><td>Polygon</td><td><code>0x89</code></td><td><code>137</code></td><td>主网 💰</td></tr>
+<tr><td>Arbitrum One</td><td><code>0xa4b1</code></td><td><code>42161</code></td><td>L2 主网 💰</td></tr>
+<tr><td>Optimism</td><td><code>0xa</code></td><td><code>10</code></td><td>L2 主网 💰</td></tr>
+<tr><td>BNB Chain</td><td><code>0x38</code></td><td><code>56</code></td><td>主网 💰</td></tr>
+<tr><td>Goerli（已废弃）</td><td><code>0x5</code></td><td><code>5</code></td><td>⚠️ 别再用</td></tr>
+</tbody>
+</table>
+
+<p><em>💰 = 真钱主网，学习阶段不要连上去发交易。完整列表见 <a href="https://chainlist.org/">chainlist.org</a>。</em></p>
+
+<div class="callout">
+<strong>记住这两个数字就够用一个月：</strong>
+<ul>
+<li><code>0xaa36a7</code> / <code>11155111</code> = Sepolia（我们主战场）</li>
+<li><code>0x1</code> / <code>1</code> = 主网（看到这个还想发交易先冷静 3 秒）</li>
+</ul>
+</div>
+
 <h2>2. 起一个空的 Vite + React + TS 项目（3 分钟）</h2>
 
 <pre><code>cd ~/sia

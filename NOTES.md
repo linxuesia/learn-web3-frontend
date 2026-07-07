@@ -18,5 +18,24 @@
 ## 已知路径与账号
 
 - Learning workspace: `~/sia/learn-web3-frontend/`
-- 简历/求职邮箱: `your-email@gmail.com`
+- 简历/求职邮箱: `linxue.sia@gmail.com`
 - 关联项目（非 web3，但可能穿插上下文）: 门窗报价助手（Taro + NestJS 小程序）
+
+## 三端同步铁律（本次会话新增，以后所有课件/文档改动都遵守）
+
+**任何内容变更都必须三端同步，缺一端算没完：**
+
+1. **本地** — `lessons/*.html`、`*.md`、`assets/*`
+2. **飞书教程文档** — `DZSqdCaxKof50zxJcrccnVtFnIh`，走原生 block 追加（`index=-1`），不贴 Markdown 源码
+3. **GitHub** — `git@github.com:linxuesia/learn-web3-frontend.git`，commit + push 到 `main`
+
+完成后回报三端状态（本地路径 / 飞书链接 / GitHub commit hash）。
+
+## 飞书教程文档（公开可读，追加式更新）
+
+- **URL**: https://shanlisi.feishu.cn/docx/DZSqdCaxKof50zxJcrccnVtFnIh
+- **document_id**: `DZSqdCaxKof50zxJcrccnVtFnIh`
+- **权限**: link_share_entity=anyone_readable（互联网获得链接的用户可阅读）
+- **更新规则**: 每完成一节课，用 `POST /open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children` `index=-1` 追加到末尾，不重建。
+- **格式**: 走飞书原生 block（heading/bullet/code_block/quote/divider），不贴 Markdown 源码。
+- **已同步**: 封面 · Lesson 01
