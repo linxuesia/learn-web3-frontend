@@ -212,6 +212,122 @@ export default function App() {
 —— 别读第三方博客，先啃 20 分钟官方 Getting Started。你今天写的每一行代码都能在这里找到出处。
 </blockquote>
 
+<h2>🚨 真实踩坑记录 · MetaMask 的 per-site network（超重要，面试必答）</h2>
+
+<div class="callout">
+<strong>症状：</strong>页面上明明连了钱包，去 MetaMask UI 里手动切换网络后，DApp 页面上的 <code>chainId</code> 纹丝不动。Console 里连 <code>window.ethereum.on('chainChanged', ...)</code> 都收不到事件。你以为是钱包卡了、代码错了、wagmi 挂了——<strong>都不是</strong>。
+</div>
+
+<h3>Root Cause（第一性原理）</h3>
+
+<p>先回到基本定义：</p>
+
+<ul>
+<li><code>window.ethereum</code> 是钱包<strong>注入到某个 origin</strong>（比如 <code>http://localhost:5173</code>）的 provider 对象，它不是"钱包本身"，是"钱包派给这个页面的一个代表"。</li>
+<li>EIP-1193 里 <code>eth_chainId</code> 的定义原文：<em>"the chain ID of the chain currently used by the wallet <strong>for this connection</strong>"</em>。</li>
+<li><code>chainChanged</code> 事件的定义：<em>"emitted when the chain has changed <strong>for this site</strong>"</em>。</li>
+</ul>
+
+<p>关键词全在 <strong>"for this site"</strong>。</p>
+
+<p><strong>MetaMask 从 v12 (2024) 开始</strong>实现了 <strong>Network per Site</strong>——每个 dApp 独立记录自己"当前"用哪个网络。你在 MM 主 UI 顶部切网络，切的是<em>钱包主界面显示的默认网络</em>，<strong>不是</strong> <code>localhost:5173</code> 这个 site 当前的网络。所以：</p>
+
+<ul>
+<li>MM UI 上看着切了 ✅</li>
+<li>但对 <code>localhost:5173</code> 这个 origin 来说，链<em>并没有变</em>；</li>
+<li>所以 <code>eth_chainId</code> 返回值不变；</li>
+<li>所以 <code>chainChanged</code> 事件<em>本来就不该 emit</em>（链根本没变），DApp 收不到很正常。</li>
+</ul>
+
+<p>这<strong>不是 bug</strong>，是 MetaMask 有意的隔离设计——避免你在一个 DApp 上操作时，另一个 tab 里忘了切链导致误签名/误转账。</p>
+
+<h3>正确姿势：DApp 主动请求切链</h3>
+
+<p>EIP-1193 + <a href="https://eips.ethereum.org/EIPS/eip-3326">EIP-3326</a>（<code>wallet_switchEthereumChain</code>）+ <a href="https://eips.ethereum.org/EIPS/eip-3085">EIP-3085</a>（<code>wallet_addEthereumChain</code>）定义的标准做法：</p>
+
+<pre><code>// 让钱包为当前 site 切到主网（如果 MM 里没这个网络，会先弹加链弹窗）
+await window.ethereum.request({
+  method: 'wallet_switchEthereumChain',
+  params: [{ chainId: '0x1' }]   // 十六进制，不是十进制
+})</code></pre>
+
+<p>用户在 <strong>MetaMask 弹窗</strong>里点确认——<em>这一刻</em>链对 <code>localhost:5173</code> 才真的变了，才会 emit <code>chainChanged</code>，wagmi 才会收到、UI 才会更新。</p>
+
+<h3>wagmi 里怎么写</h3>
+
+<pre><code>import { useSwitchChain, useChainId } from 'wagmi'
+import { mainnet, sepolia } from 'wagmi/chains'
+
+function ChainSwitcher() {
+  const chainId = useChainId()
+  const { chains, switchChain, isPending, error } = useSwitchChain()
+
+  return (
+    &lt;&gt;
+      {chains.map(c =&gt; (
+        &lt;button
+          key={c.id}
+          disabled={isPending || c.id === chainId}
+          onClick={() =&gt; switchChain({ chainId: c.id })}
+        &gt;
+          {c.id === chainId ? '✓ ' : ''}{c.name}
+        &lt;/button&gt;
+      ))}
+      {isPending &amp;&amp; &lt;p&gt;等 MM 弹窗…&lt;/p&gt;}
+      {error &amp;&amp; &lt;p style={{color:'crimson'}}&gt;{error.message}&lt;/p&gt;}
+    &lt;/&gt;
+  )
+}</code></pre>
+
+<p><strong><code>switchChain</code> 底层就是调 <code>wallet_switchEthereumChain</code></strong>，wagmi 只是帮你包一层 React state。</p>
+
+<h3>Uniswap / OpenSea / Aave 都怎么做的？</h3>
+
+<p>去看它们的 UI——<strong>永远有一个"切链"下拉菜单在钱包按钮旁边</strong>，不会指望用户去 MM 里手动切。这是行业标准做法：</p>
+
+<ul>
+<li>DApp 自己知道当前应该在哪个链（比如 Base Sepolia）</li>
+<li>用户连钱包时如果不在这个链，UI 提示"请切到 Base Sepolia" + 一键切链按钮</li>
+<li>用户点了 → 调 <code>switchChain</code> → MM 弹窗 → 用户确认 → 链切换 → UI 更新</li>
+</ul>
+
+<h3>常见问题 & 排错顺序</h3>
+
+<table>
+<thead>
+<tr><th>症状</th><th>排查</th></tr>
+</thead>
+<tbody>
+<tr><td>调 <code>switchChain</code> 报 <code>Unrecognized chain ID</code></td><td>目标链没在 MM 里，先调 <code>wallet_addEthereumChain</code>；wagmi 里 <code>chains</code> 数组包含这个链，一般会自动加</td></tr>
+<tr><td>调用后一直 pending 没弹窗</td><td>MM 扩展 service worker 睡了，点 MM 图标唤醒；或 F5 刷新页面</td></tr>
+<tr><td>用户点了"取消"</td><td>会抛 <code>UserRejectedRequestError</code>（code 4001），要 catch 并友好提示</td></tr>
+<tr><td>DApp 只支持特定链，用户切到 unsupported</td><td>用 <code>chainId in supported</code> 判断，显示"请切到 XX 链"横幅 + 引导按钮</td></tr>
+</tbody>
+</table>
+
+<h3>💡 面试可能问到</h3>
+
+<ul>
+<li><strong>Q: DApp 里怎么让用户切链？</strong><br>
+A: 调 <code>wallet_switchEthereumChain</code>（EIP-3326），钱包会弹窗让用户为当前 origin 确认。链不存在的话先调 <code>wallet_addEthereumChain</code>（EIP-3085）。wagmi 封装成 <code>useSwitchChain</code>。</li>
+
+<li><strong>Q: 用户在 MetaMask UI 里手动切网络，DApp 收得到 <code>chainChanged</code> 吗？</strong><br>
+A: MetaMask v12+ 有 per-site network 隔离，用户在 MM UI 顶部切的是钱包默认网络，不是当前 dApp 的网络。所以 dApp 的 <code>eth_chainId</code> 不变，<code>chainChanged</code> 也不会 emit。这不是 bug，是安全隔离。</li>
+
+<li><strong>Q: <code>wallet_switchEthereumChain</code> 和 <code>chainChanged</code> 事件的关系？</strong><br>
+A: 前者是 dApp → 钱包的请求，后者是钱包 → dApp 的通知。成功切链会依次触发：dApp 调 <code>wallet_switchEthereumChain</code> → 钱包弹窗 → 用户确认 → 钱包 emit <code>chainChanged(newChainId)</code> → 所有订阅者收到 → dApp 状态更新。</li>
+</ul>
+
+<div class="callout">
+<strong>sia 的踩坑时间线（真实）：</strong><br>
+1. 写好代码，MM 里手动切网，UI 不动 →<br>
+2. 加了 <code>window.ethereum.on('chainChanged', ...)</code>，切网仍不打印 →<br>
+3. 用 <code>eth_chainId</code> 直查，MM 里切网后返回值不变 →<br>
+4. 意识到：链<em>对这个 site</em>根本没变，事件当然不发 →<br>
+5. 改用 <code>wallet_switchEthereumChain</code>，弹窗一路点确认，chainChanged 立刻打出来，UI 秒变。<br>
+<em>这段的价值：真实工程里 90% 的"钱包 bug"都是这类"设计 vs 直觉"的错位。</em>
+</div>
+
 <h2>下节预告（Lesson 02）</h2>
 
 <p>在这个骨架上加：<strong>切链（Sepolia ↔ Base Sepolia）、发一笔真正的转账交易、读 tx 状态直到确认</strong>。到 Lesson 02 结束，你就跑完了"读+写"两条主线。</p>
