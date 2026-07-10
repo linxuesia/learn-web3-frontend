@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Lesson 02 · 读 ERC-20 合约：ABI、useReadContracts、decimals</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+<main>
+
+<h1>Lesson 02 · 读 ERC-20 合约</h1>
+<p class="subtitle">ABI · useReadContracts · decimals · multicall · 目标 30 分钟内跑通</p>
+
+<div class="callout">
+<strong>为什么先学\"读合约\"？</strong> Lesson 01 用 <code>useBalance</code> 读的是 <em>原生代币</em>（ETH/SepoliaETH），走 RPC 的 <code>eth_getBalance</code>。真实 DApp 90% 的读数据是 <em>调合约</em>：USDC 余额、NFT 持仓、DeFi 池子价格全是合约里的 <code>view</code> 函数。这一节把这一层打通，后面所有链上读操作都是同一个模式。
+</div>
+
+<h2>1. 前置准备（承接 Lesson 01）</h2>
+
+<ul class="checklist">
+<li>Lesson 01 那一套还在：Node 20+、MetaMask、Sepolia 网络、有测试 ETH。</li>
+<li>推荐再领点 <strong>测试 LINK</strong>：<a href="https://faucets.chain.link/sepolia">faucets.chain.link/sepolia</a>（Chainlink 官方水龙头，可以同时领 ETH + LINK，25 个 LINK 一次）。领完这一节演示看到的 <code>balanceOf</code> 就不是 0，效果直接。</li>
+<li>不领也能跑，只是余额显示 0，其他数据（name/symbol/decimals/totalSupply）照样能读——因为它们不看你的地址。</li>
+</ul>
+
+<h2>2. 三个必须先立住的概念</h2>
+
+<h3>2.1 ABI 是什么</h3>
+
+<p>ABI = Application Binary Interface。人话：合约暴露给外部的<strong>接口说明书</strong>。前端拿着 ABI 才知道：</p>
+
+<ul>
+<li>合约有哪些方法、方法叫什么、要传什么参数、返回什么类型；</li>
+<li>方法是只读（<code>view</code>/<code>pure</code>）还是要发交易（<code>nonpayable</code>/<code>payable</code>）；</li>
+<li>合约会发哪些事件（下一节讲）。</li>
+</ul>
+
+<p>ABI 通常是一坨 JSON，从 Etherscan 的合约页复制、或 Hardhat/Foundry 编译产物里拿。<strong>前端不需要塞整个 ABI</strong>——你要调哪些方法就只留哪些。ERC-20 我们这节只需要 5 个：<code>name / symbol / decimals / totalSupply / balanceOf</code>。</p>
+
+<h3>2.2 <code>view</code> 和 <code>eth_call</code>：读为什么不花 gas</h3>
+
+<p>标了 <code>view</code>（或 <code>pure</code>）的函数<strong>不上链、不广播、不花 gas</strong>。viem 把这类调用发成 <code>eth_call</code>：节点在本地跑一遍合约字节码、返回结果，没写状态所以不进区块。你把它想成"链上数据库的 SELECT"。</p>
+
+<p>反过来，写操作（<code>nonpayable</code>/<code>payable</code>）必须签名 + 上链 + 花 gas，这是 Lesson 03 的事。</p>
+
+<h3>2.3 <code>decimals</code>：ERC-20 最容易踩的坑</h3>
+
+<p>链上所有代币金额都是<strong>整数</strong>（<code>uint256</code>）。真实"1 USDC" 存的是 <code>1_000_000</code>（6 位小数），真实"1 LINK" 存的是 <code>1_000_000_000_000_000_000</code>（18 位）。<code>decimals()</code> 告诉你要挪几位小数。</p>
+
+<div class="callout">
+<strong>面试高频坑：</strong>看到 <code>balanceOf</code> 返回 <code>5000000</code> 就以为是 500 万 USDC——错，是 5 USDC。<em>永远</em>用 <code>formatUnits(value, decimals)</code>，<em>不要</em>用 <code>formatEther</code>（那是硬编码 18 位，USDC 会算错 12 个 0）。
+</div>
+
+<h2>3. 动手：新建 Lesson 02 工程</h2>
+
+<p>为了让每节课都能独立部署到 Vercel，直接复制 Lesson 01 的骨架起个新 app：</p>
+
+<pre><code>cd ~/sia/learn-web3-frontend/apps
+cp -R lesson-01-hello-web3 lesson-02-read-erc20
+cd lesson-02-read-erc20
+# 改 package.json 里的 name 为 lesson-02-read-erc20
+# 改 index.html 的 title
+rm -rf node_modules pnpm-lock.yaml package-lock.json
+pnpm install
+</code></pre>
+
+<h2>4. 代码：三步定型</h2>
+
+<h3>4.1 <code>src/erc20.ts</code> — 最小 ABI + 常量</h3>
+
+<pre><code>// 只留我们要用的 5 个方法
+export const erc20Abi = [
+  { type: 'function', name: 'name',        stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
+  { type: 'function', name: 'symbol',      stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
+  { type: 'function', name: 'decimals',    stateMutability: 'view', inputs: [], outputs: [{ type: 'uint8'  }] },
+  { type: 'function', name: 'totalSupply', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'balanceOf',   stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ type: 'uint256' }] },
+] as const
+
+export const SEPOLIA_TOKENS = {
+  LINK: { address: '0x779877A7B0D9E8603169DdbD7836e478b4624789', label: 'LINK (Chainlink)' },
+  WETH: { address: '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14', label: 'WETH' },
+  USDC: { address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', label: 'USDC (Circle)' },
+} as const
+</code></pre>
+
+<div class="callout">
+<code>as const</code> 是关键。加了它 TypeScript 才能从 ABI 推断出每个方法的入参和返回类型——不加你调 <code>balanceOf</code> 时是 <code>any</code>，加了就是 <code>bigint</code>。<em>面试题：viem 为什么能给你零配置的强类型？靠 <code>as const</code> + TS 4.9+ 的字面量类型推断。</em>
+</div>
+
+<h3>4.2 <code>src/App.tsx</code> — 一次 multicall 读全套</h3>
+
+<pre><code>import { useState } from 'react'
+import { useAccount, useReadContracts } from 'wagmi'
+import { formatUnits } from 'viem'
+import { erc20Abi, SEPOLIA_TOKENS, type TokenKey } from './erc20'
+
+const [tokenKey, setTokenKey] = useState&lt;TokenKey&gt;('LINK')
+const token = SEPOLIA_TOKENS[tokenKey]
+const { address, isConnected } = useAccount()
+
+const { data, isPending, isError, error, refetch } = useReadContracts({
+  allowFailure: false,
+  contracts: [
+    { address: token.address, abi: erc20Abi, functionName: 'name' },
+    { address: token.address, abi: erc20Abi, functionName: 'symbol' },
+    { address: token.address, abi: erc20Abi, functionName: 'decimals' },
+    { address: token.address, abi: erc20Abi, functionName: 'totalSupply' },
+    { address: token.address, abi: erc20Abi, functionName: 'balanceOf',
+      args: address ? [address] : undefined },
+  ],
+  query: { enabled: isConnected &amp;&amp; !!address },
+})
+
+const [name, symbol, decimals, totalSupply, balance] = data ?? []
+
+// 展示：formatUnits(balance, decimals) 才是人类可读金额
+</code></pre>
+
+<h3>4.3 关键 API 对照表</h3>
+
+<table class="chain-table">
+<thead>
+<tr><th>你想干嘛</th><th>Hook</th><th>底层 RPC</th></tr>
+</thead>
+<tbody>
+<tr><td>调 1 个 view 方法</td><td><code>useReadContract</code></td><td>一次 <code>eth_call</code></td></tr>
+<tr><td>调 N 个 view 方法</td><td><code>useReadContracts</code>（本节用）</td><td>打包成一次 <code>eth_call</code> 到 Multicall3</td></tr>
+<tr><td>读钱包地址原生余额</td><td><code>useBalance</code>（Lesson 01）</td><td><code>eth_getBalance</code></td></tr>
+<tr><td>订阅链上事件</td><td><code>useWatchContractEvent</code></td><td>WebSocket 或轮询 <code>eth_getLogs</code>（下几节）</td></tr>
+<tr><td>发一笔交易</td><td><code>useWriteContract</code></td><td><code>eth_sendTransaction</code>（Lesson 03）</td></tr>
+</tbody>
+</table>
+
+<h2>5. Multicall：一个必知的性能点</h2>
+
+<p>Naive 写法：调 5 个方法 = 5 次 <code>eth_call</code> = 5 次 RPC 往返 = 5 次 MetaMask/Infura 转发。慢，还容易触发免费 RPC 的限速。</p>
+
+<p><code>useReadContracts</code> 会把它们打包成<strong>一次</strong>到 <a href="https://github.com/mds1/multicall">Multicall3 合约</a>（<code>0xcA11bde05977b3631167028862bE2a173976CA11</code>，几乎所有 EVM 链同地址部署）的 <code>eth_call</code>——合约在链上一次性把 5 个结果全返回给你。这是所有稍微像样的 DApp 前端都在用的技术，<em>面试提到"你怎么优化 RPC 调用次数"这道题，就答这个</em>。</p>
+
+<h2>6. 验证你的 win（3 分钟）</h2>
+
+<ul class="checklist">
+<li><code>pnpm dev</code> 起来后连上 MetaMask（Sepolia 网络）。</li>
+<li>下拉框选 <strong>LINK</strong>：应看到 <code>name = ChainLink Token</code>、<code>symbol = LINK</code>、<code>decimals = 18</code>、<code>totalSupply</code> 非零。</li>
+<li>如果领过 LINK，<code>balanceOf</code> 那一行显示的余额和 MetaMask 里"导入代币 LINK"后看到的应该<strong>完全一致</strong>——不一致就是 <code>formatUnits</code> 位数用错了。</li>
+<li>切到 <strong>USDC</strong>：注意 <code>decimals = 6</code>。你可以试着把 App.tsx 里的 <code>formatUnits(balance, decimals)</code> 强行改成 <code>formatEther(balance)</code>，看看 USDC 金额会离谱到什么程度——这就是那 12 个 0 的教训。</li>
+<li>断网重连，点「重新读一次」按钮验证 <code>refetch()</code>。</li>
+</ul>
+
+<h2>7. 20% 的原理，够撑面试第二层</h2>
+
+<ul>
+<li><strong>ABI 编码：</strong>调 <code>balanceOf(address)</code> 时，viem 会把它编成 <code>0x70a08231</code>（函数选择器，是 <code>keccak256("balanceOf(address)")</code> 的前 4 字节）+ 32 字节地址。节点按 EVM 规则解码执行，把 <code>uint256</code> 编码回来。这一整套就叫 ABI 编码。</li>
+<li><strong>为什么 <code>balanceOf</code> 返回 bigint 不是 number？</strong> <code>uint256</code> 最大值是 2^256-1，JS 的 <code>Number</code> 最大安全整数只有 2^53-1。用 number 会精度爆炸（比如 USDT 大户余额直接被四舍五入丢钱）。</li>
+<li><strong><code>allowFailure</code> 该怎么选？</strong> 教学阶段用 <code>false</code>——任何一个失败就整体报错，好定位问题。生产里读一批 100 个 NFT 元数据时用 <code>true</code>，允许部分失败，避免一个坏合约拖垮整页。</li>
+<li><strong>为什么 <code>data</code> 一开始是 <code>undefined</code>？</strong> react-query 的取数模式。<code>isPending</code> 时还没数据，<code>isSuccess</code> 后 <code>data</code> 才有值。写 UI 时要么 <code>data ?? []</code> 兜底，要么用 <code>isPending</code> 早返回。</li>
+</ul>
+
+<h2>8. tie 回 mission</h2>
+
+<p>这节的 win 直接进简历：<em>"用 wagmi <code>useReadContracts</code> + viem 读取 ERC-20 合约状态，通过 Multicall3 合约打包 5 个 <code>view</code> 调用，减少 80% RPC 请求"</em>。这是一个具体、可验证、面试能展开讲的技术点，比"了解 web3"强 100 倍。</p>
+
+<h2>9. 下一节预告</h2>
+
+<p><strong>Lesson 03 · 发一笔真交易</strong>：<code>useWriteContract</code> + <code>useWaitForTransactionReceipt</code>，把 SepoliaETH 转给另一个地址，走完 <em>钱包签名 → mempool → 打包 → 确认</em> 整个 tx 生命周期。这是所有面试官都会问的"你发过链上交易吗"，我们让你答"发过 N 次"。</p>
+
+<h2>10. 反馈问题（决定 Lesson 03 深度）</h2>
+
+<div class="callout">
+本节结束后回答我一个问题：<strong>如果 <code>useReadContracts</code> 里第 3 个合约调用失败了、其他 4 个都成了，你希望 UI 表现是啥样？为什么？</strong> 这个问题的答案决定我下一节要不要专门加一段"读操作的失败降级"。
+</div>
+
+</main>
+</body>
+</html>
