@@ -2,6 +2,11 @@ import {
   useAccount, useConnect, useDisconnect, useBalance, useChainId, useSwitchChain,
 } from 'wagmi'
 import { formatEther } from 'viem'
+import CodePeek from './CodePeek'
+// Vite 的 ?raw 特性：把这些文件当纯文本读进来，代码永远和实际跑的一致
+import appSrc from './App.tsx?raw'
+import wagmiSrc from './wagmi.ts?raw'
+import mainSrc from './main.tsx?raw'
 
 const CHAIN_NAME: Record<number, string> = {
   1: 'Ethereum Mainnet 💰',
@@ -88,6 +93,14 @@ export default function App() {
         <code>chainChanged</code> 事件。DApp 要切链就得自己调 <code>wallet_switchEthereumChain</code>
         （wagmi 封装为 <code>useSwitchChain</code>），MM 会弹窗让用户为当前 origin 确认切网。
       </p>
+
+      <CodePeek
+        files={{
+          'App.tsx': appSrc,
+          'wagmi.ts': wagmiSrc,
+          'main.tsx': mainSrc,
+        }}
+      />
     </main>
   )
 }

@@ -5,6 +5,11 @@ import {
 import { sepolia } from 'wagmi/chains'
 import { formatUnits } from 'viem'
 import { erc20Abi, SEPOLIA_TOKENS, type TokenKey } from './erc20'
+import CodePeek from './CodePeek'
+// Vite ?raw：把源码作为字符串导入，永远和跑的版本一致
+import appSrc from './App.tsx?raw'
+import erc20Src from './erc20.ts?raw'
+import wagmiSrc from './wagmi.ts?raw'
 
 const CHAIN_NAME: Record<number, string> = {
   1: 'Ethereum Mainnet 💰',
@@ -160,6 +165,14 @@ export default function App() {
           <li>ABI 里 <code>stateMutability: 'view'</code> 表示只读，不上链、不花 gas；<code>'pure'</code> 是连链上状态都不读；<code>'nonpayable'</code>/<code>'payable'</code> 才是写操作，下一节讲。</li>
         </ul>
       </details>
+
+      <CodePeek
+        files={{
+          'App.tsx': appSrc,
+          'erc20.ts': erc20Src,
+          'wagmi.ts': wagmiSrc,
+        }}
+      />
     </main>
   )
 }
