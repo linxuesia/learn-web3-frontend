@@ -328,6 +328,94 @@ A: 前者是 dApp → 钱包的请求，后者是钱包 → dApp 的通知。成
 <em>这段的价值：真实工程里 90% 的"钱包 bug"都是这类"设计 vs 直觉"的错位。</em>
 </div>
 
+<h2>🔎 深挖 · 为什么"Injected"按钮出现快，"MetaMask"按钮慢一点（EIP-1193 vs EIP-6963）</h2>
+
+<div class="callout">
+<strong>现象：</strong>Lesson 01 页面上如果同时出现两个连接按钮，你会发现 <code>Injected</code> 按钮几乎瞬间就有，<code>MetaMask</code> 按钮要晚 200-300ms 才出现或才能点。这是<strong>钱包发现机制</strong>的架构升级带来的必然代价。
+</div>
+
+<h3>EIP-1193 时代（老，2018）：window.ethereum 单一坑位</h3>
+
+<p>最早的钱包注入协议只规定一件事：钱包把自己塞到 <code>window.ethereum</code>。</p>
+
+<pre><code>window.ethereum = &lt;MetaMask provider&gt;
+await window.ethereum.request({ method: 'eth_requestAccounts' })</code></pre>
+
+<p>问题很明显：<strong>只有一个坑位</strong>。你装了 MetaMask + Coinbase + OKX + Rabby，谁后注入谁覆盖前面的。用户想连哪个只能 disable 其他扩展——这就是历史上臭名昭著的"钱包大战"（wallet war）。</p>
+
+<p>有些钱包搞骚操作，把 <code>window.ethereum</code> 改成 <code>window.ethereum.providers</code> 数组，各家实现不统一，一坨屎。</p>
+
+<p><strong>wagmi 的 <code>injected()</code> connector</strong> 就是给这套老协议兜底的：<em>同步</em>读 <code>window.ethereum</code>——0 延迟，所以你觉得它快。缺点：连的是当前抢到 <code>window.ethereum</code> 那把钱包，可能不是用户想连的那个。</p>
+
+<h3>EIP-6963 时代（新，2023）：双向事件握手</h3>
+
+<p><strong>EIP-6963</strong>（Multi Injected Provider Discovery）标准化了一套广播-通告协议，让多个钱包共存不打架：</p>
+
+<ol>
+<li><strong>钱包自曝：</strong>页面加载时，每个钱包主动 <code>dispatchEvent('eip6963:announceProvider')</code>，带上 <code>{uuid, name, icon, rdns, provider}</code> 元数据。</li>
+<li><strong>DApp 反向询问：</strong>补漏——DApp 也发一次 <code>eip6963:requestProvider</code>，让"慢启动"的钱包再 announce 一次。</li>
+<li><strong>钱包再次响应：</strong>收到 requestProvider → 再 announce 一次。</li>
+<li><strong>DApp 收集：</strong>监听 announceProvider 累积 200-300ms → 拿到完整钱包列表。</li>
+</ol>
+
+<p>wagmi 的 <code>metaMask()</code> connector 走的就是这套。<strong>那 200-300ms 就是"discovery window"，你观察到的延迟就来源于此</strong>。</p>
+
+<h3>两者一表看清</h3>
+
+<table class="chain-table">
+<thead>
+<tr><th>维度</th><th>injected() · EIP-1193</th><th>metaMask() · EIP-6963</th></tr>
+</thead>
+<tbody>
+<tr><td>发现机制</td><td>同步读 window.ethereum</td><td>事件握手 announce/request</td></tr>
+<tr><td>冷启动延迟</td><td>~0ms</td><td>~200-300ms</td></tr>
+<tr><td>多钱包共存</td><td>❌ 只能连最后注入的</td><td>✅ 每个钱包独立列出</td></tr>
+<tr><td>元数据</td><td>只有 provider 对象</td><td>uuid/name/icon/rdns 齐全</td></tr>
+<tr><td>用户体验</td><td>蒙头连</td><td>显式选钱包，图标 + 名称</td></tr>
+<tr><td>2026 现代 DApp</td><td>兜底老浏览器</td><td>✅ 主流</td></tr>
+</tbody>
+</table>
+
+<h3>Lesson 01 里怎么改（已经改了）</h3>
+
+<p>看 <code>src/wagmi.ts</code>：</p>
+
+<pre><code>import { injected, metaMask } from 'wagmi/connectors'
+
+connectors: [
+  metaMask(),   // EIP-6963 + MetaMask SDK · 主推
+  injected(),   // EIP-1193 · 兜底老钱包
+]</code></pre>
+
+<p>UI 里 <code>useConnect().connectors</code> 会同时返回这两个 connector（wagmi 内部会去重，如果 EIP-6963 已识别到 MM，同源的 injected 有时会被合并）。</p>
+
+<h3>生产环境的三种优化</h3>
+
+<ul>
+<li><strong>骨架屏：</strong>连接按钮区显示 loading skeleton，等 EIP-6963 discovery 一收齐再渲染。用户感受"就是在扫描钱包"而不是"卡了"。</li>
+<li><strong>用 RainbowKit / ConnectKit：</strong>这些库把 EIP-6963 收集、UI 骨架、图标资源、错误处理全封装好——生产 DApp 90% 用这两个之一。</li>
+<li><strong>双兜底：</strong>就是我们现在的写法 <code>[metaMask(), injected()]</code>——新协议主推、老协议兜底。</li>
+</ul>
+
+<h3>💡 面试题（这次踩坑直接三道）</h3>
+
+<ul>
+<li><strong>Q: EIP-6963 解决什么问题？</strong><br>
+A: EIP-1193 时代 window.ethereum 单一坑位，多钱包互相覆盖。EIP-6963 用双向事件广播机制，每个钱包独立 announce 自己（带 uuid/rdns/name/icon 元数据），DApp 通过监听事件收集所有可用 provider。</li>
+
+<li><strong>Q: EIP-6963 有什么代价？</strong><br>
+A: 有 discovery window 延迟（~200-300ms），DApp 要等钱包 announce 到齐。主流做法先渲染 skeleton，收齐再显示可选列表。老 injected 快但不安全。</li>
+
+<li><strong>Q: 2026 年做 DApp 应该选哪个协议？</strong><br>
+A: EIP-6963 主推（走 metaMask() / RainbowKit / ConnectKit），EIP-1193 injected 做兜底。裸调 window.ethereum.request 已经过时。</li>
+</ul>
+
+<div class="callout">
+<strong>sia 的观察时间线：</strong><br>
+"我发现页面上有两个按钮，Injected 出现快，MetaMask 慢一点"——这个观察 100% 命中了两代协议的架构差异。EIP-1193 是同步读全局变量的 O(1) 操作，EIP-6963 是异步事件握手，多了几个 ms 但换来多钱包共存和元数据。<br>
+<em>面试问「你了解 EIP-1193 吗」时如果能顺带讲清 EIP-6963 的动机和实现，会很加分——因为绝大多数候选人只知道前者。</em>
+</div>
+
 <h2>下节预告（Lesson 02）</h2>
 
 <p>在这个骨架上加：<strong>切链（Sepolia ↔ Base Sepolia）、发一笔真正的转账交易、读 tx 状态直到确认</strong>。到 Lesson 02 结束，你就跑完了"读+写"两条主线。</p>
