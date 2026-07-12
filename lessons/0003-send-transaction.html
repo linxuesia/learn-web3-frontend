@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Lesson 03 · 发一笔真交易：tx 生命周期 & EIP-1559</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+<main>
+
+<h1>Lesson 03 · 发一笔真交易</h1>
+<p class="subtitle">useEstimateGas · useSendTransaction · useWaitForTransactionReceipt · EIP-1559 · 目标 30 分钟跑通</p>
+
+<div class="callout">
+<strong>本节 win：</strong>你会亲手在 Sepolia 发一笔转账 tx，跑通「签名 → mempool → 打包 → 确认」全套。做完能对面试官说：<em>「我发过 N 笔链上交易，理解 gas 三件套、tx 生命周期和 nonce 语义。」</em>
+</div>
+
+<h2>1. 前置准备</h2>
+
+<ul class="checklist">
+<li>Lesson 01 &amp; 02 完成：MM 连过、切链会切、读余额没问题</li>
+<li>Sepolia ETH 余额 <strong>≥ 0.005</strong>（我们每次只烧 0.0001，但 gas 也要留点）</li>
+<li>没有的话去 <a href="https://sepoliafaucet.com">sepoliafaucet.com</a> 或 <a href="https://faucets.chain.link/sepolia">faucets.chain.link/sepolia</a> 领水</li>
+</ul>
+
+<h2>2. 三个必须先立住的概念</h2>
+
+<h3>2.1 tx 生命周期（一定要背下来）</h3>
+
+<pre><code>①  用户点"发送" 
+   ↓ (前端调 wallet 的 eth_sendTransaction)
+②  钱包弹窗 → 用户签名（本地私钥签，不上链）
+   ↓
+③  签名后的 raw tx 被广播到节点，进 mempool
+   ↓ (前端此时拿到 tx hash，但 tx 还没上链！)
+④  矿工/验证者从 mempool 选 tx 打包进区块
+   ↓
+⑤  区块被广播、其他节点确认
+   ↓
+⑥  N 个确认块之后，tx 视为"最终 confirmed"（防重组）
+</code></pre>
+
+<div class="callout">
+<strong>💡 面试暴击点：</strong>tx hash ≠ tx 上链。拿到 hash 只代表进了 mempool。receipt 出现才代表打包完成（block hash 已存在）。很多新手把这两个概念搞混——面试问 <em>「你怎么判断一笔交易成功了」</em>时，答「等 receipt.status === 'success' 且有 N 个 confirmation」，而不是「拿到 tx hash」。
+</div>
+
+<h3>2.2 Gas 三件套（EIP-1559 现代模型）</h3>
+
+<p>2021 年伦敦硬分叉之前，用的是 legacy 模式：<code>gasPrice</code> 一个值走天下。用户自己出价，矿工挑高的打包，波动巨大。</p>
+
+<p>EIP-1559 拆成 <strong>3 个值</strong>，让费用更可预测：</p>
+
+<table class="chain-table">
+<thead>
+<tr><th>字段</th><th>含义</th><th>谁决定</th></tr>
+</thead>
+<tbody>
+<tr><td><code>gasLimit</code></td><td>这笔 tx 最多能用多少 gas 单位</td><td>你/钱包（估算）</td></tr>
+<tr><td><code>baseFee</code></td><td>本区块的基础 fee（每 block 根据拥堵动态调整），付给协议 <strong>销毁</strong></td><td>协议</td></tr>
+<tr><td><code>maxPriorityFeePerGas</code></td><td>小费，给矿工/验证者的激励，越高越优先</td><td>你</td></tr>
+<tr><td><code>maxFeePerGas</code></td><td>你愿意付的每 gas 上限 <code>= baseFee + priorityFee</code> 的封顶</td><td>你</td></tr>
+</tbody>
+</table>
+
+<p>实际支付：<code>gasUsed × effectiveGasPrice</code>，其中 <code>effectiveGasPrice = min(maxFeePerGas, baseFee + maxPriorityFeePerGas)</code>。<strong>你付的通常比预估少</strong>——因为 baseFee 可能比你的上限低。</p>
+
+<div class="callout">
+<strong>面试题：</strong>「EIP-1559 之后，用户为什么不会像以前那样疯狂 overpay？」<br>
+答：baseFee 由协议按上一区块拥堵动态调整（每单位气量目标 15M gas），用户只需要设一个 maxFee 上限，实际扣的钱是 baseFee + 小费。而且 <strong>baseFee 是被销毁的</strong>（不给矿工），这也是 ETH 通缩的一部分。
+</div>
+
+<h3>2.3 <code>nonce</code>：地址的"发送计数器"</h3>
+
+<p>每个地址在链上有一个 <code>nonce</code>，从 0 开始递增。发第 1 笔 tx nonce=0、第 2 笔 nonce=1……<strong>严格按顺序执行</strong>。</p>
+
+<ul>
+<li>如果 nonce=5 的 tx 卡在 mempool 没打包，nonce=6 的 tx 就算发出去也会永远 <code>pending</code>——它必须等前面那笔先上链</li>
+<li>可以用 <strong>同 nonce + 更高 gas</strong> 发一笔"替换 tx"（钱包 UI 里的 "cancel" 或 "speed up" 就是这原理）</li>
+<li>wagmi 会自动帮你管 nonce，除非做 batch 或高级操作，一般不用手动传</li>
+</ul>
+
+<h2>3. 三个核心 hook（本节主角）</h2>
+
+<table class="chain-table">
+<thead>
+<tr><th>Hook</th><th>作用</th><th>底层 RPC</th></tr>
+</thead>
+<tbody>
+<tr><td><code>useEstimateGas</code></td><td>模拟 tx 得出 gasLimit 预估（不发交易）</td><td><code>eth_estimateGas</code></td></tr>
+<tr><td><code>useFeeData</code></td><td>拉当前 baseFee + priority fee 建议值</td><td><code>eth_feeHistory</code> / <code>eth_gasPrice</code></td></tr>
+<tr><td><code>useSendTransaction</code></td><td>让钱包签名 + 广播 tx，返回 hash</td><td><code>eth_sendTransaction</code></td></tr>
+<tr><td><code>useWaitForTransactionReceipt</code></td><td>轮询直到 receipt 出现（tx 被打包）</td><td><code>eth_getTransactionReceipt</code></td></tr>
+</tbody>
+</table>
+
+<h2>4. 关键代码解剖</h2>
+
+<h3>4.1 估算 gas（预览，不发交易）</h3>
+
+<pre><code>const value = amountValid ? parseEther(amount) : undefined
+
+const gasEstimate = useEstimateGas({
+  to: toValid ? (to as Address) : undefined,
+  value,
+  query: { enabled: canPrepare },  // 输入没 ready 时别打 RPC
+})
+
+const feeData = useFeeData({ query: { enabled: isConnected } })
+
+// 手续费上限 = gasLimit × maxFeePerGas
+const estimatedFee =
+  gasEstimate.data !== undefined && feeData.data?.maxFeePerGas
+    ? gasEstimate.data * feeData.data.maxFeePerGas
+    : undefined</code></pre>
+
+<p><strong>bigint 运算：</strong>gasEstimate.data、maxFeePerGas 都是 bigint。直接 <code>*</code> 是 bigint 乘法，结果还是 bigint。<em>不要</em> Number(x) 强转，超过 2^53 就精度丢失。</p>
+
+<h3>4.2 发送（触发钱包签名 + 广播）</h3>
+
+<pre><code>const send = useSendTransaction()
+
+&lt;button onClick={() =&gt; {
+  send.sendTransaction({
+    to: to as Address,
+    value: parseEther(amount),   // ETH 转 wei（乘 10^18）
+  })
+}}&gt;
+  {send.isPending ? '等 MM 签名…' : '发送交易'}
+&lt;/button&gt;
+
+// send.data 是 tx hash（0x + 64 hex chars）
+// send.error 是各种失败：用户拒签、余额不足、gas 不够…</code></pre>
+
+<h3>4.3 等 receipt（tx 上链确认）</h3>
+
+<pre><code>const receipt = useWaitForTransactionReceipt({
+  hash: send.data,           // 传入 tx hash
+  confirmations: 1,          // 等几个确认块（测试网 1 够了）
+})
+
+// 状态字段：
+// receipt.isFetching     — 正在轮询等打包
+// receipt.isSuccess      — receipt 拿到了
+// receipt.data.status    — 'success' | 'reverted'
+// receipt.data.blockNumber, gasUsed, effectiveGasPrice…</code></pre>
+
+<div class="callout">
+<strong>❓ 为什么不用 <code>setInterval(() =&gt; eth_getTransactionReceipt, 3000)</code> 手写轮询？</strong>
+<br><br>
+❌ 会撞免费 RPC 的限速（Alchemy 免费版 25 req/s，多开几个 tab 就废）<br>
+❌ tab 切走时不会自动 pause，浪费流量<br>
+❌ 组件卸载时容易忘 clear，内存泄漏<br>
+❌ 遇到临时网络错要自己写 retry / backoff<br><br>
+✅ <code>useWaitForTransactionReceipt</code> 内部：blockNumber tracking（新块出现才检查）+ retry with backoff + tab visibility 感知 + auto cleanup on unmount。<em>轮子已经造好，别再造。</em>
+</div>
+
+<h2>5. 亲手跑一遍（最关键的 3 分钟）</h2>
+
+<ol>
+<li>打开 <a href="http://localhost:5174/">http://localhost:5174/</a>（Lesson 03 dev server）</li>
+<li>连 MetaMask（Sepolia 网络，不是就点"一键切"）</li>
+<li>收款地址保持默认 <code>0x000...dEaD</code>（burn 地址），或者填你的第二个钱包地址</li>
+<li>金额 <strong>0.0001</strong>（大约 0.35 元人民币等值，实际是测试币不值钱）</li>
+<li>看第 2 步"预估手续费"表格：<strong>gasLimit 应该是 21000</strong>（原生转账固定值）</li>
+<li>看 <strong>maxFeePerGas</strong>（gwei）× 21000 ≈ 手续费上限，估算 0.00002 ETH 左右</li>
+<li>点"发送交易"→ MM 弹窗 → 确认签名</li>
+<li>观察下方"交易状态"区块状态流：
+   <ul>
+   <li>tx hash 出现 → 已进 mempool</li>
+   <li>"等待打包" ⏳ 状态持续 12-30s</li>
+   <li>"已上链" ✅ 出现 → 展示 blockNumber、gasUsed、实际手续费</li>
+   </ul>
+</li>
+<li>点 "在 Sepolia Etherscan 上查看" → 你能看到完整链上记录</li>
+</ol>
+
+<h2>6. 面试要能答的 5 个问题</h2>
+
+<ol>
+<li><strong>「tx hash 出现代表交易成功了吗？」</strong><br>
+不。hash 只代表签名+广播完成，进了 mempool。tx 是否成功要看 receipt：<code>receipt.status === 'success'</code>。而且看到 receipt 之后最好再等 N 个 confirmation 防重组。</li>
+
+<li><strong>「EIP-1559 之前和之后 gas 模型有什么区别？」</strong><br>
+之前：单一 <code>gasPrice</code>，用户拍脑袋出价，波动巨大，overpay 严重。<br>
+之后：拆成 baseFee（协议决定、销毁）+ priority fee（给验证者的小费）。用户设 maxFee 上限，实际扣的钱是 baseFee + 小费。</li>
+
+<li><strong>「一笔 tx 卡在 mempool 怎么办？」</strong><br>
+用同一个 nonce 发一笔 gas 更高的 tx 替换掉它。转 0 ETH 给自己就是"cancel"；转原目标但提高 gas 就是"speed up"。钱包 UI 里的这两个按钮就是这原理。</li>
+
+<li><strong>「tx reverted 和 tx failed 有什么区别？」</strong><br>
+reverted：tx 上链了、gas 被扣了，但合约执行时抛异常。receipt.status = 'reverted'。<br>
+failed（没上链）：签名错、余额不到 gas、nonce 冲突……这类根本进不了 block，钱包直接报错。</li>
+
+<li><strong>「为什么原生转账 gasLimit 是 21000？」</strong><br>
+EVM 每种操作都有 gas cost 表：一笔"简单转账"消耗固定的 21000 gas（包含签名验证、状态更新等基础操作）。合约调用会额外累加每条 opcode 的 gas。gasLimit 21000 是原生转账的硬底线。</li>
+</ol>
+
+<h2>7. 20% 原理，够撑面试第二层</h2>
+
+<ul>
+<li><strong>parseEther / formatEther：</strong><code>parseEther('1')</code> = <code>10n**18n</code>。这是 wei（最小单位）。发交易 value 字段用 wei，读余额 balance.value 也是 wei，展示时才用 formatEther。<em>永远用这两个函数，不要自己乘 10^18</em>（可能精度丢失或写错幂）。</li>
+
+<li><strong>为什么估算和实际 gas 会有差？</strong>useEstimateGas 用「当前状态」模拟，但 tx 真上链时状态已经变了（有人抢先）。所以钱包通常会自动给 gasLimit 加 buffer（+20%~50%），wagmi 也会。</li>
+
+<li><strong>为啥用 <code>useFeeData</code>，为啥有 gasPrice / maxFeePerGas 两组值？</strong>兼容 legacy 网络（部分 L2/侧链没 EIP-1559）。主流 EVM 都上了 1559，直接用 maxFee + priorityFee 那组。</li>
+
+<li><strong>tx hash 是怎么算的？</strong>Keccak256(RLP(signed_tx))。是 tx 内容的哈希——同一笔 tx 在任何节点算出来都一样，所以能用作全网唯一 ID。</li>
+
+<li><strong>为什么 confirmations 默认建议 &gt; 1？</strong>防区块重组（reorg）。链偶尔会出现小分叉，短暂时刻 block N 是 A，几秒后变成 B，A 里的 tx 就"回滚"了。等 N 个确认之后 reorg 概率指数下降。主网大额交易一般 12+。</li>
+</ul>
+
+<h2>8. tie 回 mission &amp; 简历</h2>
+
+<p>这节的 win 直接进简历："使用 wagmi <code>useSendTransaction</code> + <code>useWaitForTransactionReceipt</code> 实现原生 ETH 转账交易，处理完整生命周期（签名/mempool/打包/确认），基于 EIP-1559 gas 模型展示预估手续费与实际手续费差异"——这一段每个技术点都能面试展开讲。</p>
+
+<h2>9. 反馈问题（决定 Lesson 04 深度）</h2>
+
+<div class="callout">
+本节结束回答两个：
+<ol>
+<li>你的 tx 在 Etherscan 上，"Nonce" 字段是几？想想为什么。</li>
+<li>如果我想连着发 5 笔转账（每笔 0.0001 ETH），不 await 每一笔的 receipt，直接 for 循环调 sendTransaction()，会发生什么？</li>
+</ol>
+</div>
+
+<h2>10. 下节预告（Lesson 04）</h2>
+
+<p><strong>调合约的写方法：ERC-20 transfer / approve。</strong> useWriteContract + useSimulateContract 双 hook 组合，模拟 → 签名 → 广播 → 等 receipt。真实 DApp 90% 的写操作是"调合约写方法"（不是原生转账），Lesson 04 打通这最后一环，你就能自己搓一个"发 LINK 给朋友"的 DApp 了。</p>
+
+</main>
+</body>
+</html>
