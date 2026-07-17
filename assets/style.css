@@ -149,6 +149,50 @@ blockquote {
   color: var(--muted);
 }
 
+.lesson-nav {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  align-items: stretch;
+  margin: 3rem 0 1rem;
+  padding: 0;
+  flex-wrap: wrap;
+}
+.lesson-nav a {
+  flex: 1 1 45%;
+  min-width: 220px;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+  display: block;
+}
+.lesson-nav a:hover {
+  border-color: #888;
+  background: #fafafa;
+  transform: translateY(-1px);
+}
+.lesson-nav a.next { text-align: right; }
+.lesson-nav .nav-hint {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+  letter-spacing: 0.03em;
+}
+.lesson-nav .nav-title {
+  display: block;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.lesson-nav a.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
