@@ -26,16 +26,30 @@
 **任何内容变更都必须三端同步，缺一端算没完：**
 
 1. **本地** — `lessons/*.html`、`*.md`、`assets/*`
-2. **飞书教程文档** — `DZSqdCaxKof50zxJcrccnVtFnIh`，走原生 block 追加（`index=-1`），不贴 Markdown 源码
-3. **GitHub** — `git@github.com:linxuesia/learn-web3-frontend.git`，commit + push 到 `main`
+2. **飞书课程系列文件夹** — `QJbMf0SXilwFU6dMneTcqIj9n2g`（见下），每节课一个 docx，追加式更新
+3. **GitHub** — `git@github.com:linxuesia/learn-web3-frontend.git`，commit + push 到 `master`
 
 完成后回报三端状态（本地路径 / 飞书链接 / GitHub commit hash）。
 
-## 飞书教程文档（公开可读，追加式更新）
+## 飞书课程系列（sia 是所有者，bot 保留 full_access）
 
-- **URL**: https://shanlisi.feishu.cn/docx/DZSqdCaxKof50zxJcrccnVtFnIh
-- **document_id**: `DZSqdCaxKof50zxJcrccnVtFnIh`
-- **权限**: link_share_entity=anyone_readable（互联网获得链接的用户可阅读）
-- **更新规则**: 每完成一节课，用 `POST /open-apis/docx/v1/documents/{doc_id}/blocks/{doc_id}/children` `index=-1` 追加到末尾，不重建。
-- **格式**: 走飞书原生 block（heading/bullet/code_block/quote/divider），不贴 Markdown 源码。
-- **已同步**: 封面 · Lesson 01
+- **文件夹**: `QJbMf0SXilwFU6dMneTcqIj9n2g` — 「Web3 前端从 0 到 1 · 学习系列」
+  - URL: https://my.feishu.cn/drive/folder/QJbMf0SXilwFU6dMneTcqIj9n2g
+- **规则**: 每节课独立 docx（不再往 L01 doc 里堆），全部收进这个文件夹
+- **owner**: sia (`ou_b054825b6015149969ccfc891e21b609`)。bot (`ou_6e2d1edb671ca5f0e37d926cca918321`) 保留 full_access 用来继续追加内容
+- **格式**: 飞书原生 block（heading/bullet/code_block/quote/divider），不贴 Markdown
+
+### 各节文档
+
+| Lesson | doc_token | 标题 |
+|---|---|---|
+| L01 | `DZSqdCaxKof50zxJcrccnVtFnIh` | Web3 前端从 0 到 1 · 实战教程（初期做的合集，只包含 L01 内容） |
+| L02 | `XlNudaUFiouTycxq2Q4c9PXxndg` | Web3 前端 · Lesson 02 · 读 ERC-20 合约 |
+| L03 | `F6nedSNrnoCIFoxiMKlc7yrfn45` | Web3 前端 · Lesson 03 · 发一笔真交易 |
+
+### 新建文档 / 多维表格的强制流程（不要漏）
+
+1. 创建 docx / bitable
+2. **`transfer_owner` 转给 sia**（`ou_b054825b6015149969ccfc891e21b609`），带 `stay_put=true` 让 bot 保留 full_access
+3. `move` 到对应文件夹（学习系列 → `QJbMf0SXilwFU6dMneTcqIj9n2g`；其他项目类似地建独立系列文件夹）
+4. 把文档链接发到飞书 DM 给 sia
