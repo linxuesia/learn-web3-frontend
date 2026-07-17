@@ -59,6 +59,8 @@ learn-web3-frontend/
 ## 进度
 
 - [x] Lesson 01: 第一支能跑的 DApp — 连钱包 + 读余额
+- [x] Lesson 02: 读 ERC-20 合约 — ABI + useReadContracts + decimals + Multicall
+- [x] Lesson 03: 发一笔真交易 — useSendTransaction + tx 生命周期 + EIP-1559 fee
 
 ## License
 
