@@ -6,8 +6,9 @@
 
 import type { Address } from 'viem'
 
-// TODO(Step 2): 部署后填入真实地址
-export const TIP_JAR_ADDRESS: Address = '0x0000000000000000000000000000000000000000'
+// TipJar 合约 · Sepolia 部署地址
+// 部署 tx: 见 https://sepolia.etherscan.io/address/0x70F19bD42Fb048d20d5c1A071f4Aaa955a1b3684
+export const TIP_JAR_ADDRESS: Address = '0x70F19bD42Fb048d20d5c1A071f4Aaa955a1b3684'
 
 // TipJar.sol 的最小 ABI（只保留前端要调的方法 / 事件）
 // as const 让 wagmi 能自动推导参数类型 + 返回值类型
