@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   useAccount, useConnect, useDisconnect, useChainId, useSwitchChain,
   useBalance,
@@ -5,16 +6,13 @@ import {
 import { sepolia } from 'wagmi/chains'
 import { formatEther } from 'viem'
 import { TIP_JAR_ADDRESS } from './contract'
+import { TipJarStats } from './components/TipJarStats'
+import { TipForm } from './components/TipForm'
+import { TipWall } from './components/TipWall'
 
 // ────────────────────────────────────────────────────────────────
 // Mission · Sepolia Tip Jar 🍺
-// 目标：一个能演示的 end-to-end DApp，跑完一个月 mission 的验收
-// 三节课的技能会全部串联：
-//   Lesson 01 → 连钱包 + 切链
-//   Lesson 02 → 读合约（余额 + 留言列表，用 useReadContracts + Multicall）
-//   Lesson 03 → 发交易（tip + message，走 useWriteContract）
-//   ➕ 新技能 → 事件监听（useWatchContractEvent，让新留言实时刷进 UI）
-// 部署：Vercel
+// End-to-end DApp：连钱包 → 读合约 → 发交易 → 事件订阅 → Vercel 部署
 // ────────────────────────────────────────────────────────────────
 
 const CHAIN_NAME: Record<number, string> = {
@@ -35,58 +33,58 @@ export default function App() {
   const onSepolia = chainId === sepolia.id
   const contractDeployed = TIP_JAR_ADDRESS !== '0x0000000000000000000000000000000000000000'
 
+  // 用 counter 让 TipWall 在打赏成功后强制刷新 totalTips
+  const [refreshKey, setRefreshKey] = useState(0)
+
   return (
-    <main style={{ maxWidth: 760, margin: '3rem auto', fontFamily: 'system-ui', padding: '0 1.5rem' }}>
-      <h1>Sepolia Tip Jar 🍺</h1>
-      <p style={{ color: '#666' }}>
+    <main style={{
+      maxWidth: 760, margin: '3rem auto', padding: '0 1.5rem',
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+    }}>
+      <h1 style={{ marginBottom: 6 }}>Sepolia Tip Jar 🍺</h1>
+      <p style={{ color: '#666', marginTop: 0 }}>
         给这个墙留一句话 + 转一点点 Sepolia ETH。所有留言公开可见，链上永不删除。
       </p>
 
-      {/* ─── Step 1 状态提示：合约还没部署 ─── */}
       {!contractDeployed && (
         <div style={{
           padding: '14px 18px', background: '#fef3c7', border: '1px solid #fbbf24',
           borderRadius: 8, marginBottom: 20, fontSize: 14, lineHeight: 1.6,
         }}>
-          <strong>🚧 Step 1 骨架已就位，等 Step 2 部署合约。</strong>
+          <strong>🚧 Step 2 未完成：合约还没部署。</strong>
           <br />
-          下一步：用 Remix 部署 <code>contracts/TipJar.sol</code> 到 Sepolia，把地址填进{' '}
-          <code>src/contract.ts</code> 就能继续。
+          用 Remix 部署 <code>contracts/TipJar.sol</code> 到 Sepolia，把地址填进{' '}
+          <code>src/contract.ts</code>。
         </div>
       )}
 
       {!isConnected ? (
-        <div>
-          {connectors.map((c) => (
-            <button
-              key={c.uid}
-              onClick={() => connect({ connector: c })}
-              style={{ marginRight: 8, padding: '8px 16px', cursor: 'pointer' }}
-            >
-              连接 {c.name}
-            </button>
-          ))}
-          {connectStatus === 'pending' && <p>连接中…</p>}
-          {connectError && <p style={{ color: 'crimson' }}>{connectError.message}</p>}
-        </div>
+        <ConnectPanel
+          connectors={connectors}
+          connect={connect}
+          connectStatus={connectStatus}
+          connectError={connectError}
+        />
       ) : (
         <>
-          {/* ─── 账户信息 ─── */}
+          {/* 账户信息 */}
           <section style={{
-            background: '#f7f7f8', padding: '12px 16px', borderRadius: 8, marginBottom: 20,
+            background: '#f7f7f8', padding: '12px 16px', borderRadius: 8,
+            marginBottom: 20, fontSize: 14,
           }}>
-            <p style={{ margin: '4px 0' }}>
-              地址：<code>{address}</code>
-            </p>
-            <p style={{ margin: '4px 0' }}>
+            <div style={{ margin: '4px 0' }}>
+              地址：<code style={{ fontSize: 12 }}>{address}</code>
+            </div>
+            <div style={{ margin: '4px 0' }}>
               网络：<strong>{CHAIN_NAME[chainId] ?? '未知'}</strong>{' '}
-              <code>chainId={chainId}</code>
-            </p>
-            <p style={{ margin: '4px 0' }}>
-              钱包余额：{balance ? `${formatEther(balance.value)} ${balance.symbol}` : '读取中…'}
-            </p>
+              <code style={{ fontSize: 12 }}>chainId={chainId}</code>
+            </div>
+            <div style={{ margin: '4px 0' }}>
+              钱包余额：
+              {balance ? `${formatEther(balance.value)} ${balance.symbol}` : '读取中…'}
+            </div>
             {!onSepolia && (
-              <p style={{ color: 'crimson', margin: '4px 0' }}>
+              <div style={{ color: 'crimson', margin: '8px 0' }}>
                 ⚠️ 当前不是 Sepolia。
                 <button
                   onClick={() => switchChain({ chainId: sepolia.id })}
@@ -95,69 +93,77 @@ export default function App() {
                 >
                   {switching ? '等 MM 确认…' : '一键切到 Sepolia'}
                 </button>
-              </p>
+              </div>
             )}
             <button onClick={() => disconnect()} style={{ marginTop: 6 }}>断开</button>
           </section>
 
-          {/* ─── Step 2: 读合约（余额 + 留言列表） ─── */}
-          <section style={{
-            marginBottom: 20, padding: '14px 18px', border: '1px dashed #d4d4d8',
-            borderRadius: 8, color: '#888', fontSize: 14,
-          }}>
-            <h3 style={{ margin: '0 0 8px', color: '#444' }}>[TODO Step 3] Tip Jar 状态</h3>
-            <p style={{ margin: 0 }}>
-              这里会显示：<br />
-              · Tip Jar 合约余额（<code>useReadContract</code> · <code>getBalance()</code>）
-              <br />
-              · 最新 N 条留言（<code>useReadContracts</code> · Multicall 打包 <code>getMessage(i)</code>）
-              <br />
-              · Owner 是谁（是不是我）
-            </p>
-          </section>
-
-          {/* ─── Step 3: 发交易（tip + message） ─── */}
-          <section style={{
-            marginBottom: 20, padding: '14px 18px', border: '1px dashed #d4d4d8',
-            borderRadius: 8, color: '#888', fontSize: 14,
-          }}>
-            <h3 style={{ margin: '0 0 8px', color: '#444' }}>[TODO Step 3] 打赏 + 留言</h3>
-            <p style={{ margin: 0 }}>
-              · 输入金额 + 留言内容
-              <br />
-              · <code>useWriteContract.writeContract</code> 调用 <code>tip(string)</code> 并 <code>value</code> 附 ETH
-              <br />
-              · <code>useWaitForTransactionReceipt</code> 等确认
-              <br />
-              · 成功后自动清空表单
-            </p>
-          </section>
-
-          {/* ─── Step 3+: 事件监听 ─── */}
-          <section style={{
-            marginBottom: 20, padding: '14px 18px', border: '1px dashed #d4d4d8',
-            borderRadius: 8, color: '#888', fontSize: 14,
-          }}>
-            <h3 style={{ margin: '0 0 8px', color: '#444' }}>[TODO Step 3] 实时新留言</h3>
-            <p style={{ margin: 0 }}>
-              <code>useWatchContractEvent</code> 订阅 <code>NewTip(address,uint256,string)</code>
-              事件；有新交易就 push 进 UI 顶部，附 <code>from / value / message</code> 三列。
-              <br />
-              简历里「event subscription」的落点。
-            </p>
-          </section>
+          {onSepolia && contractDeployed ? (
+            <>
+              <TipJarStats />
+              <TipForm onSuccess={() => setRefreshKey((k) => k + 1)} />
+              <TipWall refreshKey={refreshKey} />
+            </>
+          ) : (
+            !onSepolia && (
+              <p style={{ color: '#888', fontStyle: 'italic' }}>
+                切到 Sepolia 才能看留言墙和打赏 ☝️
+              </p>
+            )
+          )}
 
           <hr style={{ margin: '2rem 0 1rem', border: 'none', borderTop: '1px solid #eee' }} />
           <details>
             <summary style={{ cursor: 'pointer', color: '#666' }}>Mission 说明（点开）</summary>
             <ul style={{ color: '#555', fontSize: 14, lineHeight: 1.7 }}>
-              <li><strong>为什么做这个：</strong>一次串起「连钱包 · 读合约 · 发交易 · 事件订阅 · Vercel 部署」五件事，正好是简历 Web3 前端项目要 tick 的所有 box。</li>
-              <li><strong>合约选择 Tip Jar：</strong>逻辑极简（十几行 Solidity）但覆盖 payable / state / event 三个核心；不需要 ERC-20/721 的额外概念。</li>
-              <li><strong>只上 Sepolia：</strong>不花真钱，faucet 领水就够跑。</li>
+              <li>
+                <strong>合约：</strong>
+                <a
+                  href={`https://sepolia.etherscan.io/address/${TIP_JAR_ADDRESS}`}
+                  target="_blank" rel="noreferrer"
+                >
+                  {TIP_JAR_ADDRESS}
+                </a>
+              </li>
+              <li><strong>技能覆盖：</strong>连钱包 · Multicall 读 · payable 写 · event 订阅</li>
+              <li><strong>Sepolia 特性：</strong>测试网，链上永久留言，不花真钱</li>
             </ul>
           </details>
         </>
       )}
     </main>
+  )
+}
+
+// ── 连接钱包子组件 ────────────────────────────────────────────
+function ConnectPanel({
+  connectors, connect, connectStatus, connectError,
+}: {
+  connectors: readonly { uid: string; name: string; icon?: string }[]
+  connect: (opts: { connector: any }) => void
+  connectStatus: string
+  connectError: Error | null
+}) {
+  return (
+    <div>
+      <p style={{ color: '#666' }}>先连一个钱包，我们就可以开始了。</p>
+      {connectors.map((c) => (
+        <button
+          key={c.uid}
+          onClick={() => connect({ connector: c })}
+          style={{
+            marginRight: 8, padding: '10px 20px', cursor: 'pointer',
+            background: 'white', border: '1px solid #d4d4d8', borderRadius: 6,
+            fontSize: 14,
+          }}
+        >
+          连接 {c.name}
+        </button>
+      ))}
+      {connectStatus === 'pending' && <p>连接中…</p>}
+      {connectError && (
+        <p style={{ color: 'crimson' }}>{connectError.message}</p>
+      )}
+    </div>
   )
 }
